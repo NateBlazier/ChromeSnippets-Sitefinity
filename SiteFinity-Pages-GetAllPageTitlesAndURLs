@@ -1,0 +1,132 @@
+let clickCount = 0;
+const maxClicks = 10;
+
+async function expandAllCaretsAsync() {
+  try {
+    while (clickCount < maxClicks) {
+      const carets = document.querySelectorAll('.k-icon.k-font-icon.k-i-caret-alt-right');
+      if (carets.length === 0) break;
+
+      carets.forEach(el => el.click());
+      clickCount++;
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    console.log(`Expansion complete after ${clickCount} cycle(s).`);
+  } catch (error) {
+    console.error('Error during caret expansion:', error);
+    throw error;
+  }
+}
+
+function collectTreeDataWithHierarchy() {
+  const items = [];
+  try {
+    document.querySelectorAll('li[kendotreeviewitem]').forEach(item => {
+      const treeIndex = item.getAttribute('data-treeindex');
+      const parentIndex = treeIndex?.split('_').slice(0, -1).join('_') || null;
+
+      const row = item.querySelector('.sf-tree-list__row');
+      const titleEl = row?.querySelector('[data-title-element]');
+      const linkEl = row?.querySelector('a[href*="http"]');
+
+      if (titleEl) {
+        items.push({
+          id: treeIndex,
+          parentId: parentIndex,
+          title: titleEl.textContent.trim(),
+          href: linkEl?.href || ''
+        });
+      }
+    });
+    console.log(`Collected ${items.length} items.`);
+    return items;
+  } catch (error) {
+    console.error('Error collecting tree data:', error);
+    throw error;
+  }
+}
+
+function buildHierarchyRows(items) {
+  try {
+    const map = {};
+    items.forEach(item => map[item.id] = { ...item, children: [] });
+
+    items.forEach(item => {
+      if (item.parentId && map[item.parentId]) {
+        map[item.parentId].children.push(map[item.id]);
+      }
+    });
+
+    const roots = items.filter(item => !item.parentId || !map[item.parentId]);
+    const rows = [];
+
+    function walk(node, path = []) {
+      const row = [
+        node.href.replace(/^https?:\/\/[^/]+/, ""),
+        node.href,
+        ...path,
+        node.title
+      ];
+      rows.push(row);
+      node.children.forEach(child => walk(child, [...path, node.title]));
+    }
+
+    roots.forEach(root => walk(map[root.id]));
+    console.log(`Built ${rows.length} rows for CSV.`);
+    return rows;
+  } catch (error) {
+    console.error('Error building hierarchy rows:', error);
+    throw error;
+  }
+}
+
+function exportHierarchyToCSV(rows, filename = 'tree-export-hierarchy.csv') {
+  try {
+    const maxDepth = Math.max(...rows.map(row => row.length - 2));
+    const headers = ['Path Only', 'URL', ...Array.from({ length: maxDepth }, (_, i) => `Level ${i + 1}`)];
+    const csv = [headers.join(',')];
+
+    rows.forEach(row => {
+      const paddedRow = row.concat(Array(maxDepth - (row.length - 2)).fill(""));
+      csv.push(paddedRow.map(value => `"${value.replace(/"/g, '""')}"`).join(','));
+    });
+
+    const blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    // Revoke the URL after a short delay to ensure download starts
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+      console.log(`Download triggered for ${filename}`);
+    }, 100);
+  } catch (error) {
+    console.error('Error exporting to CSV:', error);
+    throw error;
+  }
+}
+
+// Run everything
+(async () => {
+  try {
+    await expandAllCaretsAsync();
+    const rawItems = collectTreeDataWithHierarchy();
+    if (rawItems.length === 0) {
+      console.warn('No items collected; CSV will be empty.');
+    }
+    const rows = buildHierarchyRows(rawItems);
+    if (rows.length === 0) {
+      console.warn('No rows generated; CSV will be empty.');
+    }
+    exportHierarchyToCSV(rows);
+  } catch (error) {
+    console.error('Script failed:', error);
+  }
+})();
